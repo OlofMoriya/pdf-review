@@ -78,7 +78,32 @@ Open each `… - review - Name.json` you get back with PDF Review (or drop it in
 with their name, and the sidebar filters by person. A newer review from the same person
 replaces their earlier one. **Export** gives one Markdown list with names.
 
-Review lists can also be written by an agent, see [REVIEW_LISTS.md](REVIEW_LISTS.md).
+## Having an AI review a document
+
+An AI agent (Claude Code, Codex, or similar) does not annotate the PDF. It writes a **review
+list**: places to look at, each pinned to quoted text, which you then work through in the app.
+The full format is in [REVIEW_LISTS.md](REVIEW_LISTS.md).
+
+How the agent should work:
+
+1. **Read the text the way the app sees it**, so quotes match:
+   `pdf-review --text file.pdf` (on Mac the binary is
+   `~/Applications/PDF Review.app/Contents/MacOS/pdf-review` or in `/Applications`).
+2. **Find what a human must decide or check**: contradictions, missing owners or dates, vague
+   requirements, numbers that disagree between sections, open TODOs, things that need sign-off.
+   Skip typos and style unless asked.
+3. **One item per place.** `title` says what to do in a few words, `detail` says why. Set
+   `priority` (`high` for blocking issues).
+4. **Quote verbatim**: half a sentence copied from the `--text` output, never paraphrased, and
+   set `page` too.
+5. **Deliver it**: write the JSON into `~/.pdf-review/inbox/` for yourself, or save it as
+   `<pdf name>.review.json` next to the PDF when sending to someone else.
+
+A prompt you can give the agent:
+
+> Review `/path/to/file.pdf` with PDF Review. Read `REVIEW_LISTS.md` in the pdf-review repo,
+> extract the text with `pdf-review --text`, and write a review list of the places I need to
+> check or decide, quoting the text verbatim. Put it in `~/.pdf-review/inbox/`.
 
 ## Optional: ask Owl about a passage
 
