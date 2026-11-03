@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- deep red body, warmer at the top: Reader's red, pushed toward neon -->
+    <linearGradient id="bg" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#ff4a4f"/>
+      <stop offset="0.55" stop-color="#e3112f"/>
+      <stop offset="1" stop-color="#8e0626"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f1e6e8"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5263"/>
+      <stop offset="1" stop-color="#c40a32"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#3a0010" flood-opacity="0.55"/>
+    </filter>
+    <filter id="lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#5a0018" flood-opacity="0.45"/>
+    </filter>
+    <clipPath id="pageClip">
+      <path d="M332 214 H628 L724 310 V790 Q724 812 702 812 H332 Q310 812 310 790 V236 Q310 214 332 214 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- body (macOS grid: 824px on a 1024 canvas) -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glow)"/>
+  <rect x="102" y="102" width="820" height="820" rx="184" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="3"/>
+
+  <!-- the document, slightly tilted -->
+  <g transform="rotate(-7 517 513)">
+    <g filter="url(#shadow)">
+      <path d="M332 214 H628 L724 310 V790 Q724 812 702 812 H332 Q310 812 310 790 V236 Q310 214 332 214 Z" fill="url(#page)"/>
+    </g>
+    <path d="M628 214 V288 Q628 310 650 310 H724 Z" fill="#e7c9cf"/>
+
+    <g clip-path="url(#pageClip)">
+      <!-- text lines -->
+      <g fill="#e2d3d6">
+        <rect x="360" y="290" width="200" height="22" rx="11"/>
+        <rect x="360" y="352" width="310" height="16" rx="8"/>
+        <rect x="360" y="392" width="310" height="16" rx="8"/>
+        <rect x="360" y="432" width="250" height="16" rx="8"/>
+        <rect x="360" y="672" width="310" height="16" rx="8"/>
+        <rect x="360" y="712" width="190" height="16" rx="8"/>
+      </g>
+      <!-- highlighted passage, following the text over two lines -->
+      <g fill="#ffd23f">
+        <rect x="350" y="472" width="334" height="34" rx="7"/>
+        <rect x="350" y="512" width="214" height="34" rx="7"/>
+      </g>
+      <g fill="#b88a00" fill-opacity="0.55">
+        <rect x="360" y="481" width="310" height="16" rx="8"/>
+        <rect x="360" y="521" width="194" height="16" rx="8"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- review ribbon: one looping stroke that underlines and circles, breaking out of the page -->
+  <g filter="url(#lift)">
+    <path d="M228 690
+             C 330 650, 470 640, 560 610
+             C 690 568, 760 470, 700 420
+             C 640 372, 548 436, 582 520
+             C 612 596, 720 640, 840 612"
+          fill="none" stroke="#ffffff" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M228 690
+             C 330 650, 470 640, 560 610
+             C 690 568, 760 470, 700 420
+             C 640 372, 548 436, 582 520
+             C 612 596, 720 640, 840 612"
+          fill="none" stroke="url(#ribbon)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

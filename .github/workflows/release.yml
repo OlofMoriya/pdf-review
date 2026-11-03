@@ -1,0 +1,84 @@
+# Push a tag like v0.2.0 to build the Mac and Windows apps and publish them as a GitHub Release.
+# Run it by hand (Actions → Release → Run workflow) to build without publishing.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust with both Mac targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --release
+      - name: Build Apple Silicon and Intel, merge into one universal binary
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p dist
+          lipo -create -output dist/pdf-review \
+            target/aarch64-apple-darwin/release/pdf-review \
+            target/x86_64-apple-darwin/release/pdf-review
+          lipo -info dist/pdf-review
+      - name: Bundle .app and .dmg
+        run: |
+          mkdir -p dist/dmg
+          APP_DIR=dist/dmg BIN=dist/pdf-review SIGN_IDENTITY=- sh scripts/bundle.sh
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "PDF Review" -srcfolder dist/dmg -ov -format UDZO "dist/PDF-Review-mac.dmg"
+          shasum -a 256 dist/PDF-Review-mac.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: dist/PDF-Review-mac.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --release
+      - name: Build
+        run: cargo build --release
+      - name: Zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/PDF-Review | Out-Null
+          Copy-Item target/release/pdf-review.exe "dist/PDF-Review/PDF Review.exe"
+          Copy-Item LICENSE, README.md dist/PDF-Review/
+          Compress-Archive -Path dist/PDF-Review -DestinationPath dist/PDF-Review-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/PDF-Review-windows.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "PDF Review $GITHUB_REF_NAME" \
+            --notes "Download **PDF-Review-mac.dmg** (Apple Silicon and Intel) or **PDF-Review-windows.zip**. First launch needs one extra click, see [Install](https://github.com/${{ github.repository }}#install)."
