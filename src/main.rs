@@ -1,5 +1,7 @@
 // No console window behind the app on Windows (release builds).
-#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+// The Windows app has no console window. The `console` feature builds `pdf-review.exe` for the
+// command line, which keeps one so --text and --send can print.
+#![cfg_attr(all(windows, not(debug_assertions), not(feature = "console")), windows_subsystem = "windows")]
 //! pdf-review: a GPUI PDF viewer for reviewing documents.
 //! Mark up pages (highlight, underline, strike, box, pen, pinned note), attach a note to
 //! each mark, and export the review as Markdown. Annotations autosave to
@@ -4472,11 +4474,6 @@ fn set_dock_icon() {
 
 /// Command-line use, for agents and scripts (see REVIEW_LISTS.md). Returns the exit code.
 fn cli(args: &[String]) -> i32 {
-    // The Windows release build has no console of its own; borrow the terminal's.
-    #[cfg(all(windows, not(debug_assertions)))]
-    unsafe {
-        windows_sys::Win32::System::Console::AttachConsole(windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS);
-    }
     let usage = "usage:\n  pdf-review --text <file.pdf>    print each page's text as the app searches it\n  pdf-review --send <file.json>   put a review list or reading notes in the inbox\n  pdf-review --inbox              print the inbox folder";
     match (args[0].as_str(), args.get(1)) {
         ("--text", Some(file)) => match load_pages(&PathBuf::from(file)) {

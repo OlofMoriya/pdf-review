@@ -52,13 +52,16 @@ jobs:
       - name: Test
         run: cargo test --release
       - name: Build
-        run: cargo build --release
+        run: |
+          cargo build --release --features console
+          Copy-Item target/release/pdf-review.exe pdf-review-console.exe
+          cargo build --release
       - name: CLI smoke test
         shell: pwsh
         run: |
-          $inbox = target/release/pdf-review.exe --inbox
+          $inbox = ./pdf-review-console.exe --inbox
           if (-not $inbox) { throw "--inbox printed nothing" }
-          $text = target/release/pdf-review.exe --text tests/fixtures/sentences.pdf | Out-String
+          $text = ./pdf-review-console.exe --text tests/fixtures/sentences.pdf | Out-String
           if ($text -notmatch "page 1") { throw "--text printed nothing" }
           Write-Output $inbox
       - name: Zip
@@ -66,6 +69,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist/PDF-Review | Out-Null
           Copy-Item target/release/pdf-review.exe "dist/PDF-Review/PDF Review.exe"
+          Copy-Item pdf-review-console.exe dist/PDF-Review/pdf-review.exe
           Copy-Item LICENSE, README.md dist/PDF-Review/
           Compress-Archive -Path dist/PDF-Review -DestinationPath dist/PDF-Review-windows.zip
       - uses: actions/upload-artifact@v4

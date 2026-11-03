@@ -136,8 +136,10 @@ Where the binary is:
 - **Mac:** `"/Applications/PDF Review.app/Contents/MacOS/pdf-review"` (or under
   `~/Applications`). To call it as `pdf-review`:
   `ln -s "/Applications/PDF Review.app/Contents/MacOS/pdf-review" /opt/homebrew/bin/pdf-review`
-- **Windows:** `"PDF Review.exe"` in the folder you unzipped, for example
-  `& "$HOME\Documents\PDF-Review\PDF Review.exe" --inbox` in PowerShell.
+- **Windows:** `pdf-review.exe` in the folder you unzipped (next to `PDF Review.exe`, which is
+  the app without a console window and prints nothing), for example
+  `& "$HOME\Documents\PDF-Review\pdf-review.exe" --inbox` in PowerShell. Add the folder to
+  your PATH to call it as `pdf-review`.
 
 The inbox is `~/.pdf-review/inbox/` on Mac and `%USERPROFILE%\.pdf-review\inbox\` on Windows.
 Files can be copied there directly too; `--send` just checks them first and writes safely.

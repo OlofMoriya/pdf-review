@@ -46,7 +46,7 @@ Print the text exactly as the app searches it, page by page:
 
 ```bash
 "/Applications/PDF Review.app/Contents/MacOS/pdf-review" --text /path/to/file.pdf   # Mac
-& "C:\path\to\PDF Review.exe" --text C:\path\to\file.pdf                   # Windows
+& "C:\path\to\PDF-Review\pdf-review.exe" --text C:\path\to\file.pdf          # Windows
 ```
 
 Quote from this output. Other extractors may render some glyphs differently, and then the
