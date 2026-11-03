@@ -6,6 +6,7 @@
 //! `~/.pdf-review/annotations/<content-hash>.json`, so they follow the PDF across renames/moves.
 
 mod owl;
+mod review;
 mod search;
 mod tasks;
 mod vim;
@@ -139,6 +140,9 @@ struct Ann {
     spans: Vec<R>,
     text: String,
     note: String,
+    /// Who wrote it, for annotations imported from someone's sent review. Empty = you.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    author: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -162,6 +166,9 @@ struct Settings {
     sidebar_w: Option<f32>,
     #[serde(default)]
     minimap: bool,
+    /// Your name, put on reviews you send.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 fn settings_file() -> PathBuf {
@@ -420,6 +427,11 @@ struct Reviewer {
     last_page: usize,
     picker: Option<Picker>,
     picker_scroll: ScrollHandle,
+    reviewer_name: Option<String>,
+    /// "Your name" prompt, shown the first time you send a review.
+    name_prompt: Option<String>,
+    /// Sidebar filter: None = everyone, Some("") = you, Some(name) = that reviewer.
+    author_filter: Option<String>,
 }
 
 /// ⌘ on macOS, Ctrl elsewhere. On Windows Ctrl+D/U/B stay Vim scrolls (half page down/up, page up).
@@ -689,6 +701,9 @@ impl Reviewer {
             last_page: 0,
             picker: None,
             picker_scroll: ScrollHandle::new(),
+            reviewer_name: settings.name.clone(),
+            name_prompt: None,
+            author_filter: None,
         };
         #[cfg(target_os = "macos")]
         {
@@ -743,6 +758,14 @@ impl Reviewer {
     }
 
     fn open(&mut self, path: PathBuf) {
+        if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("json")) {
+            self.status = match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| self.import_review(&s)) {
+                Ok(Some(msg)) => msg.into(),
+                Ok(None) => "That review is for another document. Open the PDF first, then the review.".into(),
+                Err(e) => e.into(),
+            };
+            return;
+        }
         match load_pages(&path) {
             Ok(pages) => {
                 self.pages = pages;
@@ -762,6 +785,8 @@ impl Reviewer {
                 self.vim.reset();
                 self.repair_quotes();
                 self.resolve_tasks();
+                self.author_filter = None;
+                self.import_list_beside();
                 self.selected = None;
                 self.editing = false;
                 self.picker = None;
@@ -794,15 +819,39 @@ impl Reviewer {
     }
 
     fn markdown(&self) -> String {
+        let mut md = self.markdown_of(&self.sorted(), "Review");
+        let mut people: Vec<&str> = self.anns.iter().map(|a| a.author.as_str()).filter(|a| !a.is_empty()).collect();
+        people.sort();
+        people.dedup();
+        if !people.is_empty() {
+            md += "\n## By reviewer\n\n";
+            let me = self.reviewer_name.clone().unwrap_or_else(|| "Me".into());
+            for who in std::iter::once("").chain(people) {
+                let n = self.anns.iter().filter(|a| a.author == who).count();
+                if n > 0 {
+                    md += &format!("- {}: {n}\n", if who.is_empty() { me.as_str() } else { who });
+                }
+            }
+        }
+        md
+    }
+
+    /// Markdown for some annotations, by page. Names the author when several people commented.
+    fn markdown_of(&self, anns: &[Ann], heading: &str) -> String {
         let name = self.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let mut md = format!("# Review: {name}\n\n{} annotations.\n", self.anns.len());
+        let mut md = format!("# {heading}: {name}\n\n{} annotations.\n", anns.len());
+        let named = anns.iter().any(|a| !a.author.is_empty());
+        let me = self.reviewer_name.clone().unwrap_or_else(|| "Me".into());
         let mut page = 0;
-        for a in self.sorted() {
+        for a in anns.iter().cloned() {
             if a.page != page {
                 page = a.page;
                 md += &format!("\n## Page {page}\n");
             }
             md += &format!("\n- **{}**", a.kind.label());
+            if named {
+                md += &format!(" · {}", if a.author.is_empty() { me.as_str() } else { a.author.as_str() });
+            }
             if !a.text.is_empty() {
                 md += &format!("\n  > {}", a.text.replace('\n', "\n  > "));
             }
@@ -1412,7 +1461,7 @@ impl Reviewer {
         self.checkpoint();
         self.status = "".into();
         let color = self.tool_colors.get(&kind).copied().unwrap_or(PALETTE[0]);
-        self.anns.push(Ann { id: id.clone(), page, kind, color: hex(color), rect, points, spans, text, note: String::new() });
+        self.anns.push(Ann { id: id.clone(), page, kind, color: hex(color), rect, points, spans, text, note: String::new(), author: String::new() });
         self.selected = Some(id);
         self.begin_edit();
         self.save();
@@ -1515,6 +1564,21 @@ impl Reviewer {
         let mut changed = false;
         let mut waiting = vec![];
         for file in files {
+            if let Some(json) = std::fs::read_to_string(&file).ok().filter(|s| review::is_review(s)) {
+                match self.import_review(&json) {
+                    Ok(Some(msg)) => {
+                        self.status = msg.into();
+                        file_away(&file, "imported");
+                    }
+                    Ok(None) => waiting.push(file.file_name().unwrap_or_default().to_string_lossy().to_string()),
+                    Err(e) => {
+                        self.status = e.into();
+                        file_away(&file, "rejected");
+                    }
+                }
+                changed = true;
+                continue;
+            }
             let list = match std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|s| tasks::parse(&s)) {
                 Ok(l) => l,
                 Err(e) => {
@@ -1552,6 +1616,152 @@ impl Reviewer {
             changed = true;
         }
         changed
+    }
+
+    /// Import someone's sent review into the open document, replacing what they sent before.
+    /// Ok(None) when it is for another document.
+    fn import_review(&mut self, json: &str) -> Result<Option<String>, String> {
+        let sent: review::Sent<Ann> = serde_json::from_str(json).map_err(|e| format!("Not a valid review: {e}"))?;
+        let who = sent.reviewer.trim().to_string();
+        if who.is_empty() {
+            return Err("Review has no reviewer name".into());
+        }
+        let ours = self.path.as_ref().is_some_and(|p| tasks::matches_document(&sent.document, p));
+        if !ours {
+            return Ok(None);
+        }
+        self.checkpoint();
+        self.anns.retain(|a| a.author != who);
+        let n = sent.annotations.len();
+        self.anns.extend(sent.annotations.into_iter().map(|mut a| {
+            a.author = who.clone();
+            a.id = uuid::Uuid::new_v4().to_string();
+            a
+        }));
+        self.save();
+        self.side_tab = SideTab::Annotations;
+        self.author_filter = None;
+        Ok(Some(format!("Imported {n} annotation{} from {who}", if n == 1 { "" } else { "s" })))
+    }
+
+    /// A review list shipped next to the PDF (`name.review.json`), imported once.
+    fn import_list_beside(&mut self) {
+        let Some(file) = self.path.as_deref().and_then(review::list_beside) else { return };
+        let Ok(list) = std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|s| tasks::parse(&s)) else { return };
+        let name = list.title.clone().unwrap_or_else(|| "Review list".into());
+        let from = list.from.clone().unwrap_or_else(|| "agent".into());
+        if self.tasks.iter().any(|t| t.list == name && t.from == from) {
+            return;
+        }
+        let new = tasks::into_tasks(list, now_secs(), || uuid::Uuid::new_v4().to_string());
+        let n = new.len();
+        self.tasks.extend(new);
+        self.resolve_tasks();
+        self.save();
+        self.side_tab = SideTab::Review;
+        self.status = format!("{name} from {from}: {n} item{} to review", if n == 1 { "" } else { "s" }).into();
+    }
+
+    /// Write your annotations, with your name, to Downloads for emailing back.
+    fn send_review(&mut self) {
+        let Some(path) = self.path.clone() else { return };
+        let Some(me) = self.reviewer_name.clone() else {
+            self.name_prompt = Some(review::os_user_name());
+            return;
+        };
+        let mine: Vec<Ann> = self.sorted().into_iter().filter(|a| a.author.is_empty()).collect();
+        let sent = review::Sent {
+            format: review::FORMAT.into(),
+            document: path.file_name().unwrap_or_default().to_string_lossy().into(),
+            reviewer: me.clone(),
+            sent: now_secs(),
+            items: self.sorted_tasks().into_iter().map(|t| review::ItemState { title: t.title.clone(), done: t.done }).collect(),
+            annotations: mine.clone(),
+        };
+        let out = review::out_dir().join(review::file_name(&path, &me));
+        let md = self.markdown_of(&mine, &format!("Review by {me}"));
+        let res = std::fs::write(&out, serde_json::to_string_pretty(&sent).unwrap()).and_then(|_| std::fs::write(out.with_extension("md"), md));
+        self.status = match res {
+            Ok(_) => {
+                review::reveal(&out);
+                format!("Saved {} ({} annotations). Attach it to an email to send it back.", out.display(), mine.len()).into()
+            }
+            Err(e) => format!("Could not save the review: {e}").into(),
+        };
+    }
+
+    fn name_key(&mut self, k: &gpui::Keystroke) {
+        let Some(name) = &mut self.name_prompt else { return };
+        match k.key.as_str() {
+            "escape" => self.name_prompt = None,
+            "enter" => {
+                let n = name.trim().to_string();
+                if !n.is_empty() {
+                    self.reviewer_name = Some(n);
+                    self.name_prompt = None;
+                    self.save_settings();
+                    self.send_review();
+                }
+            }
+            "backspace" => {
+                name.pop();
+            }
+            _ => {
+                if let Some(t) = k.key_char.clone().filter(|_| !k.modifiers.control && !k.modifiers.platform) {
+                    name.push_str(&t);
+                }
+            }
+        }
+    }
+
+    fn name_view(&self) -> impl IntoElement + use<> {
+        let name = self.name_prompt.clone().unwrap_or_default();
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .justify_center()
+            .pt(px(140.))
+            .bg(with_alpha(0x000000, 0.45))
+            .child(
+                div()
+                    .w(px(460.))
+                    .h_full()
+                    .max_h(px(190.))
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p_5()
+                    .rounded_xl()
+                    .bg(rgb(C_PANEL))
+                    .border_1()
+                    .border_color(rgb(C_BORDER))
+                    .shadow_lg()
+                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child("Your name"))
+                    .child(div().text_sm().text_color(rgb(C_MUTED)).child("Shown next to your comments when the review is read. Asked once."))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .h(px(36.))
+                            .px_3()
+                            .rounded_md()
+                            .bg(rgb(C_BG))
+                            .border_1()
+                            .border_color(rgb(C_ACCENT))
+                            .child(name)
+                            .child(div().text_color(rgb(C_ACCENT)).child("▏")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_3()
+                            .text_xs()
+                            .text_color(rgb(C_FAINT))
+                            .child("↵ save and send")
+                            .child("esc cancel"),
+                    ),
+            )
     }
 
     fn resolve_tasks(&mut self) {
@@ -2245,7 +2455,7 @@ impl Reviewer {
     }
 
     fn save_settings(&self) {
-        let s = Settings { sidebar_w: self.sidebar_w, minimap: self.minimap };
+        let s = Settings { sidebar_w: self.sidebar_w, minimap: self.minimap, name: self.reviewer_name.clone() };
         if let Some(dir) = settings_file().parent() {
             let _ = std::fs::create_dir_all(dir);
         }
@@ -2508,6 +2718,11 @@ impl Reviewer {
             cx.notify();
             return;
         }
+        if self.name_prompt.is_some() {
+            self.name_key(k);
+            cx.notify();
+            return;
+        }
         if self.search.as_ref().is_some_and(|s| s.typing) && !shortcut(k) {
             self.search_key(k);
             cx.notify();
@@ -2520,6 +2735,7 @@ impl Reviewer {
                 "z" => self.undo(false),
                 "f" => self.run_vim(vim::Cmd::SearchStart),
                 "o" => self.show_picker(),
+                "e" if k.modifiers.shift => self.send_review(),
                 "e" => self.export_md(cx),
                 "=" | "+" => self.zoom_to(self.zoom + 0.25, None),
                 "-" => self.zoom_to(self.zoom - 0.25, None),
@@ -2916,6 +3132,16 @@ impl Reviewer {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 window.focus(&this.focus);
                                 this.show_picker();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        plain_button("send")
+                            .child("Send review")
+                            .tooltip(Tip::view("Save your comments, with your name, to email back", Some("⇧⌘E")))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                window.focus(&this.focus);
+                                this.send_review();
                                 cx.notify();
                             })),
                     )
@@ -3414,8 +3640,46 @@ impl Reviewer {
     }
 
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let items = self.sorted();
+        let mut people: Vec<String> = self.anns.iter().map(|a| a.author.clone()).filter(|a| !a.is_empty()).collect();
+        people.sort();
+        people.dedup();
+        let filter = self.author_filter.clone();
+        let items: Vec<Ann> = self.sorted().into_iter().filter(|a| filter.as_ref().is_none_or(|f| &a.author == f)).collect();
         let count = items.len();
+        // One chip per reviewer once others' reviews are imported.
+        let chips = (!people.is_empty()).then(|| {
+            let me = self.reviewer_name.clone().unwrap_or_else(|| "Me".into());
+            let opts: Vec<(Option<String>, String)> = [(None, "Everyone".to_string()), (Some(String::new()), me)]
+                .into_iter()
+                .chain(people.into_iter().map(|p| (Some(p.clone()), p)))
+                .collect();
+            div()
+                .flex_none()
+                .flex()
+                .flex_wrap()
+                .gap_1()
+                .px_3()
+                .pt_3()
+                .children(opts.into_iter().enumerate().map(|(i, (f, label))| {
+                    let n = self.anns.iter().filter(|a| f.as_ref().is_none_or(|f| &a.author == f)).count();
+                    let active = self.author_filter == f;
+                    div()
+                        .id(("who", i))
+                        .px_2()
+                        .py_0p5()
+                        .rounded_full()
+                        .text_xs()
+                        .cursor_pointer()
+                        .bg(rgb(if active { C_ACCENT } else { C_SEG }))
+                        .text_color(rgb(if active { 0xffffff } else { C_MUTED }))
+                        .hover(|d| d.text_color(rgb(0xffffff)))
+                        .child(format!("{label} {n}"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.author_filter = f.clone();
+                            cx.notify();
+                        }))
+                }))
+        });
         let caret = self.caret;
         let empty_msg = if self.pages.is_empty() {
             "Open a PDF to start reviewing."
@@ -3481,6 +3745,9 @@ impl Reviewer {
                             .child(div().size(px(8.)).rounded_full().bg(rgb(color)))
                             .child(div().font_weight(FontWeight::MEDIUM).child(a.kind.label()))
                             .child(div().text_color(rgb(C_MUTED)).child(format!("Page {}", a.page)))
+                            .when(!a.author.is_empty(), |d| {
+                                d.child(div().px_1p5().rounded_sm().bg(rgb(C_SEG)).text_color(rgb(C_TEXT)).child(a.author.clone()))
+                            })
                             .child(div().flex_1())
                             .when(self.owl_path.is_some() && !a.text.is_empty(), |d| {
                                 let ask_id = a.id.clone();
@@ -3612,7 +3879,7 @@ impl Reviewer {
                     .px_2()
                     .child(
                         segment().h(px(30.)).text_sm().children([
-                            (SideTab::Annotations, "tab-ann", "Annotations", count.to_string()),
+                            (SideTab::Annotations, "tab-ann", "Annotations", self.anns.len().to_string()),
                             (SideTab::Review, "tab-review", "Review", {
                                 let open = self.tasks.iter().filter(|t| !t.done).count();
                                 if self.tasks.is_empty() { "0".into() } else { format!("{open}/{}", self.tasks.len()) }
@@ -3644,7 +3911,7 @@ impl Reviewer {
             .child(if self.side_tab == SideTab::Review {
                 div().id("review-list").flex_1().min_h_0().overflow_y_scroll().p_3().child(self.review_view(cx)).into_any_element()
             } else {
-                list.into_any_element()
+                div().flex_1().min_h_0().flex().flex_col().children(chips).child(list).into_any_element()
             })
             .child(
                 div()
@@ -3926,6 +4193,7 @@ impl Render for Reviewer {
         let overlay = self.picker.is_some().then(|| self.picker_view(cx));
         let search_overlay = self.search.as_ref().is_some_and(|s| s.typing).then(|| self.search_view(cx));
         let ask_overlay = self.ask.is_some().then(|| self.ask_view(cx));
+        let name_overlay = self.name_prompt.is_some().then(|| self.name_view());
         let current = self.current_page();
         if current != self.last_page {
             self.last_page = current;
@@ -4046,6 +4314,7 @@ impl Render for Reviewer {
             )
             .children(search_overlay)
             .children(ask_overlay)
+            .children(name_overlay)
             .children(overlay)
     }
 }

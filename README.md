@@ -57,13 +57,28 @@ Open a PDF with ⌘O / Ctrl+O, by dropping it on the app, or with *Open With →
 | `m<a>`, `'<a>` | Set mark, jump to mark |
 | `Tab`, `x` | Next review item, mark it done |
 | ⌘E / Ctrl+E | Export the review as Markdown |
+| ⇧⌘E / Ctrl+Shift+E | Send review (your comments, with your name) |
 
 Annotations are saved automatically in `~/.pdf-review/`. The PDF itself is never changed.
 
-## Review lists
+## Reviewing a document someone sent you
 
-Someone (or an agent) can send you a list of places to look at in a document. See
-[REVIEW_LISTS.md](REVIEW_LISTS.md).
+1. Keep the PDF and its review list together in one folder: `Policy.pdf` and
+   `Policy.review.json`. Opening the PDF loads the list into the **Review** tab, with numbered
+   badges on the pages. **Tab** goes to the next item, **x** ticks it off.
+2. Highlight, underline and write notes as you like.
+3. Click **Send review** (⇧⌘E / Ctrl+Shift+E). The first time, it asks for your name. It saves
+   `Policy - review - Your Name.json` (plus a readable `.md`) in **Downloads** and shows it.
+   Attach the `.json` to an email back.
+
+## Collecting reviews
+
+Open each `… - review - Name.json` you get back with PDF Review (or drop it in
+`~/.pdf-review/inbox/`) while the PDF is open. Everyone's comments appear on the pages, tagged
+with their name, and the sidebar filters by person. A newer review from the same person
+replaces their earlier one. **Export** gives one Markdown list with names.
+
+Review lists can also be written by an agent, see [REVIEW_LISTS.md](REVIEW_LISTS.md).
 
 ## Build from source
 

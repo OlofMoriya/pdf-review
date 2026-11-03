@@ -60,6 +60,9 @@ quote would not match.
 
 ## Delivery rules
 
+- To ship a list with the PDF instead (for example to people without an inbox), save it as
+  `<pdf name>.review.json` in the same folder as the PDF. It is imported when the PDF opens.
+
 - Write the file under a temporary name first and rename it to `*.json` when complete,
   or just write it in one go. Files younger than about a second are left alone, so a
   half-written file is not read.
