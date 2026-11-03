@@ -53,6 +53,14 @@ jobs:
         run: cargo test --release
       - name: Build
         run: cargo build --release
+      - name: CLI smoke test
+        shell: pwsh
+        run: |
+          $inbox = target/release/pdf-review.exe --inbox
+          if (-not $inbox) { throw "--inbox printed nothing" }
+          $text = target/release/pdf-review.exe --text tests/fixtures/sentences.pdf | Out-String
+          if ($text -notmatch "page 1") { throw "--text printed nothing" }
+          Write-Output $inbox
       - name: Zip
         shell: pwsh
         run: |

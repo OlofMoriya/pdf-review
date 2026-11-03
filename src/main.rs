@@ -11,7 +11,7 @@ mod search;
 mod tasks;
 mod vim;
 
-use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, path::{Path, PathBuf}, rc::Rc, sync::Arc};
 
 use gpui::{
     App, Application, BorderStyle, Bounds, ClipboardItem, Context, FocusHandle, FontWeight, Hsla,
@@ -4470,28 +4470,71 @@ fn set_dock_icon() {
     }
 }
 
-fn main() {
-    // `pdf-review --text file.pdf`: print each page's text exactly as the app searches it,
-    // so agents can copy quotes for review lists (see REVIEW_LISTS.md).
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("--text") {
-        let Some(file) = args.get(2) else {
-            eprintln!("usage: pdf-review --text <file.pdf>");
-            std::process::exit(2);
-        };
-        match load_pages(&PathBuf::from(file)) {
+/// Command-line use, for agents and scripts (see REVIEW_LISTS.md). Returns the exit code.
+fn cli(args: &[String]) -> i32 {
+    // The Windows release build has no console of its own; borrow the terminal's.
+    #[cfg(all(windows, not(debug_assertions)))]
+    unsafe {
+        windows_sys::Win32::System::Console::AttachConsole(windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS);
+    }
+    let usage = "usage:\n  pdf-review --text <file.pdf>    print each page's text as the app searches it\n  pdf-review --send <file.json>   put a review list or reading notes in the inbox\n  pdf-review --inbox              print the inbox folder";
+    match (args[0].as_str(), args.get(1)) {
+        ("--text", Some(file)) => match load_pages(&PathBuf::from(file)) {
             Ok(pages) => {
                 for (i, pv) in pages.iter().enumerate() {
                     println!("=== page {} ===", i + 1);
                     println!("{}", pv.flat.iter().collect::<String>());
                 }
+                0
             }
             Err(e) => {
                 eprintln!("could not read {file}: {e}");
-                std::process::exit(1);
+                1
             }
+        },
+        ("--send", Some(file)) => match send_to_inbox(Path::new(file)) {
+            Ok(dest) => {
+                println!("{}", dest.display());
+                0
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        },
+        ("--inbox", None) => {
+            println!("{}", inbox_dir().display());
+            0
         }
-        return;
+        _ => {
+            eprintln!("{usage}");
+            2
+        }
+    }
+}
+
+/// Check a review list or sent review and move it into the inbox atomically.
+fn send_to_inbox(file: &Path) -> Result<PathBuf, String> {
+    let json = std::fs::read_to_string(file).map_err(|e| format!("could not read {}: {e}", file.display()))?;
+    if review::is_review(&json) {
+        serde_json::from_str::<review::Sent<Ann>>(&json).map_err(|e| format!("not a valid review: {e}"))?;
+    } else {
+        tasks::parse(&json)?;
+    }
+    let dir = inbox_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = format!("{}-{}.json", now_secs(), file.file_stem().unwrap_or_default().to_string_lossy());
+    let tmp = dir.join(format!("{name}.part"));
+    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    let dest = dir.join(name);
+    std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+    Ok(dest)
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|a| a.starts_with("--")) {
+        std::process::exit(cli(&args[1..]));
     }
     let arg = std::env::args().nth(1).map(PathBuf::from);
     // Files opened from Finder / "Open With" arrive as file:// URLs, possibly before launch finishes.
