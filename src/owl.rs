@@ -30,6 +30,18 @@ impl Running {
     }
 }
 
+/// The Owl binary to use, only when settings.json opts in (`"owl": "auto"` or a path).
+pub fn configured(setting: Option<&str>) -> Option<PathBuf> {
+    match setting.map(str::trim) {
+        None | Some("") => None,
+        Some("auto") => find(),
+        Some(path) => {
+            let p = PathBuf::from(path);
+            p.is_file().then_some(p)
+        }
+    }
+}
+
 /// Finder-launched apps get a minimal PATH, so also look where Go and Homebrew install.
 pub fn find() -> Option<PathBuf> {
     let home = std::env::home_dir().unwrap_or_default();
@@ -172,6 +184,15 @@ mod tests {
             assert!(a.windows(2).any(|w| w == ["-history", "0"]));
             assert_eq!(a.last().unwrap(), "q");
         }
+    }
+
+    #[test]
+    fn off_unless_configured() {
+        assert_eq!(configured(None), None);
+        assert_eq!(configured(Some("  ")), None);
+        assert_eq!(configured(Some("/no/such/owl")), None);
+        let me = std::env::current_exe().unwrap();
+        assert_eq!(configured(Some(me.to_str().unwrap())), Some(me));
     }
 
     #[test]

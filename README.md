@@ -80,6 +80,22 @@ replaces their earlier one. **Export** gives one Markdown list with names.
 
 Review lists can also be written by an agent, see [REVIEW_LISTS.md](REVIEW_LISTS.md).
 
+## Optional: ask Owl about a passage
+
+PDF Review can send a passage and a question to [Owl](https://github.com/OlofMoriya/owl), an
+AI assistant CLI (local via Ollama, or external via Codex), and save the answer as a note.
+It is off, and hidden, unless you set it up:
+
+1. Install Owl by following its [README](https://github.com/OlofMoriya/owl#quick-start).
+2. Add `"owl"` to `~/.pdf-review/settings.json`: `"auto"` finds `owl` on your PATH (and in
+   `~/go/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`), or give the full path:
+
+   ```json
+   { "owl": "auto" }
+   ```
+
+3. Restart PDF Review. An **Ask** tool (`o`) appears in the toolbar.
+
 ## Build from source
 
 ```bash

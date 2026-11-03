@@ -169,6 +169,10 @@ struct Settings {
     /// Your name, put on reviews you send.
     #[serde(default)]
     name: Option<String>,
+    /// Owl integration (https://github.com/OlofMoriya/owl). Off unless set: "auto" finds `owl`
+    /// on PATH and in the usual install folders, anything else is the path to the binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owl: Option<String>,
 }
 
 fn settings_file() -> PathBuf {
@@ -406,7 +410,9 @@ struct Reviewer {
     vim: vim::Vim,
     search: Option<SearchState>,
     search_scroll: ScrollHandle,
+    /// Set only when Owl is configured in settings.json and found; every Owl feature checks it.
     owl_path: Option<PathBuf>,
+    owl_setting: Option<String>,
     ask: Option<AskState>,
     marks: std::collections::BTreeMap<char, (usize, f32)>,
     last_jump: Option<(usize, f32)>,
@@ -683,7 +689,8 @@ impl Reviewer {
             vim: vim::Vim::default(),
             search: None,
             search_scroll: ScrollHandle::new(),
-            owl_path: owl::find(),
+            owl_path: owl::configured(settings.owl.as_deref()),
+            owl_setting: settings.owl.clone(),
             ask: None,
             marks: Default::default(),
             last_jump: None,
@@ -2455,7 +2462,7 @@ impl Reviewer {
     }
 
     fn save_settings(&self) {
-        let s = Settings { sidebar_w: self.sidebar_w, minimap: self.minimap, name: self.reviewer_name.clone() };
+        let s = Settings { sidebar_w: self.sidebar_w, minimap: self.minimap, name: self.reviewer_name.clone(), owl: self.owl_setting.clone() };
         if let Some(dir) = settings_file().parent() {
             let _ = std::fs::create_dir_all(dir);
         }
