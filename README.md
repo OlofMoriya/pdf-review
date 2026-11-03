@@ -80,9 +80,12 @@ replaces their earlier one. **Export** gives one Markdown list with names.
 
 ## Having an AI review a document
 
-An AI agent (Claude Code, Codex, or similar) does not annotate the PDF. It writes a **review
-list**: places to look at, each pinned to quoted text, which you then work through in the app.
-The full format is in [REVIEW_LISTS.md](REVIEW_LISTS.md).
+An AI agent (Claude Code, Codex, or similar) never edits the PDF. It sends one of two files,
+both pinned to quoted text (formats in [REVIEW_LISTS.md](REVIEW_LISTS.md)):
+
+- a **review list**: places *you* must check or decide, a checklist in the **Review** tab;
+- **reading notes**: the agent's own comments, shown as highlights with notes, tagged with its
+  name like any reviewer's, in the **Annotations** tab.
 
 How the agent should work:
 
@@ -104,6 +107,14 @@ A prompt you can give the agent:
 > Review `/path/to/file.pdf` with PDF Review. Read `REVIEW_LISTS.md` in the pdf-review repo,
 > extract the text with `pdf-review --text`, and write a review list of the places I need to
 > check or decide, quoting the text verbatim. Put it in `~/.pdf-review/inbox/`.
+
+For reading notes, the same steps apply, but step 3 is one note per passage that explains,
+summarises or flags something, and the file is a review with `notes`:
+
+> Read `/path/to/file.pdf` and push reading notes to PDF Review as "Claude", following the
+> reading notes section of `REVIEW_LISTS.md`. Quote verbatim from `pdf-review --text`.
+
+Sending notes again under the same name replaces that agent's earlier notes.
 
 ## Optional: ask Owl about a passage
 

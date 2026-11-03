@@ -71,6 +71,36 @@ quote would not match.
 - Imported files move to `~/.pdf-review/inbox/imported/`, and invalid ones to `inbox/rejected/`
   (the reason shows in the app's footer).
 
+## Reading notes: the agent's own comments
+
+A review list asks the reader to do something. To leave comments instead (summaries,
+explanations, flags), send a review with `notes`. Each note becomes a highlight on its quote
+with the note attached, tagged with `reviewer`, exactly like a person's sent review.
+
+```json
+{
+  "format": "pdf-review/review",
+  "document": "/Users/me/Downloads/security-policy.pdf",
+  "reviewer": "Claude",
+  "notes": [
+    { "quote": "Breaches are reported within 72 hours", "page": 12, "note": "Matches GDPR art. 33, but 5.2.2 says 48 hours." },
+    { "page": 3, "note": "Section 3 in short: who owns which system." }
+  ]
+}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `format` | yes | Always `pdf-review/review`. |
+| `document` | yes | As for review lists. |
+| `reviewer` | yes | Name the notes are tagged with. A new file with the same name replaces that reviewer's notes. |
+| `notes[].note` | yes | The comment. |
+| `notes[].quote` | no | Verbatim text to highlight, found the same way as review list quotes. |
+| `notes[].page` | no | Picks between repeated quotes. Without a quote, or if it is not found, the note becomes a sticky note at the top left of this page (marked "quote not found"). |
+
+Write it into `~/.pdf-review/inbox/`. It is imported when the document is open, otherwise it
+waits. Keep notes few and useful: one per passage worth a comment, not one per paragraph.
+
 ## For the reviewer
 
 - **Tab / ⇧Tab** (or `]` / `[`): next or previous open item.

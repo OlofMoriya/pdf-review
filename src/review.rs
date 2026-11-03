@@ -14,11 +14,27 @@ pub struct Sent<A> {
     pub format: String,
     pub document: String,
     pub reviewer: String,
+    #[serde(default)]
     pub sent: u64,
+    #[serde(default = "Vec::new")]
     pub annotations: Vec<A>,
+    /// Reading notes from an agent, placed by quote instead of coordinates.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<Note>,
     /// Review-list items and whether the reviewer ticked them off.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<ItemState>,
+}
+
+/// A note pinned to quoted text. Becomes a text highlight with the note attached, or a
+/// sticky note on `page` (top left) when the quote is missing or not found.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Note {
+    #[serde(default)]
+    pub quote: String,
+    #[serde(default)]
+    pub page: Option<usize>,
+    pub note: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -82,7 +98,7 @@ mod tests {
     fn names_and_detection() {
         assert_eq!(file_name(Path::new("/x/Policy v2.pdf"), "Anna Svensson"), "Policy v2 - review - Anna Svensson.json");
         assert_eq!(file_name(Path::new("a.pdf"), " A/B: C "), "a - review - A_B_ C.json");
-        let sent = Sent::<u8> { format: FORMAT.into(), document: "a.pdf".into(), reviewer: "A".into(), sent: 1, annotations: vec![], items: vec![] };
+        let sent = Sent::<u8> { format: FORMAT.into(), document: "a.pdf".into(), reviewer: "A".into(), sent: 1, annotations: vec![], notes: vec![], items: vec![] };
         assert!(is_review(&serde_json::to_string(&sent).unwrap()));
         assert!(!is_review(r#"{"document":"a.pdf","items":[{"title":"x"}]}"#));
         assert!(!is_review("nope"));

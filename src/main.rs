@@ -1639,8 +1639,10 @@ impl Reviewer {
         }
         self.checkpoint();
         self.anns.retain(|a| a.author != who);
-        let n = sent.annotations.len();
-        self.anns.extend(sent.annotations.into_iter().map(|mut a| {
+        let mut new = sent.annotations;
+        new.extend(sent.notes.iter().filter_map(|n| self.note_ann(n)));
+        let n = new.len();
+        self.anns.extend(new.into_iter().map(|mut a| {
             a.author = who.clone();
             a.id = uuid::Uuid::new_v4().to_string();
             a
@@ -1649,6 +1651,29 @@ impl Reviewer {
         self.side_tab = SideTab::Annotations;
         self.author_filter = None;
         Ok(Some(format!("Imported {n} annotation{} from {who}", if n == 1 { "" } else { "s" })))
+    }
+
+    /// An agent's reading note: a highlight on its quote, else a sticky note on its page.
+    fn note_ann(&self, n: &review::Note) -> Option<Ann> {
+        let flats: Vec<&[char]> = self.pages.iter().map(|p| p.flat.as_slice()).collect();
+        let found = tasks::locate(&flats, &n.quote, n.page).and_then(|(page, a, b)| {
+            let pv = &self.pages[page - 1];
+            let (spans, text) = pv.range(pv.flat_pos[a], pv.flat_pos[b]);
+            (!spans.is_empty()).then_some((page, spans, text))
+        });
+        let color = |k: Kind| hex(self.tool_colors.get(&k).copied().unwrap_or(PALETTE[0]));
+        let ann = |page, kind, rect, spans, text| Ann { id: String::new(), page, kind, color: color(kind), rect, points: vec![], spans, text, note: n.note.clone(), author: String::new() };
+        match found {
+            Some((page, spans, text)) => {
+                let pts: Vec<(f32, f32)> = spans.iter().flat_map(|r| [(r.x, r.y), (r.x + r.w, r.y + r.h)]).collect();
+                Some(ann(page, Kind::TextHighlight, bbox(&pts), spans, text))
+            }
+            None => {
+                let page = n.page.filter(|p| (1..=self.pages.len()).contains(p))?;
+                let note = if n.quote.is_empty() { n.note.clone() } else { format!("{}\n\n(quote not found: \"{}\")", n.note, n.quote) };
+                Some(Ann { note, ..ann(page, Kind::Note, R { x: 24.0, y: 24.0, w: 0.0, h: 0.0 }, vec![], String::new()) })
+            }
+        }
     }
 
     /// A review list shipped next to the PDF (`name.review.json`), imported once.
@@ -1684,6 +1709,7 @@ impl Reviewer {
             sent: now_secs(),
             items: self.sorted_tasks().into_iter().map(|t| review::ItemState { title: t.title.clone(), done: t.done }).collect(),
             annotations: mine.clone(),
+            notes: vec![],
         };
         let out = review::out_dir().join(review::file_name(&path, &me));
         let md = self.markdown_of(&mine, &format!("Review by {me}"));
