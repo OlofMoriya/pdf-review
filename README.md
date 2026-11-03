@@ -32,7 +32,12 @@ brew install --cask olofmoriya/tap/pdf-review
 
 Homebrew asks you to trust third-party taps once (`brew trust`).
 
-The first launch still needs **Open Anyway** as above.
+macOS still blocks the first launch. Either use **Open Anyway** as above, or clear the
+quarantine flag once after installing (and after each `brew upgrade`):
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/PDF Review.app"
+```
 
 ### Windows
 
