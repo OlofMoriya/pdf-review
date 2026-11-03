@@ -78,8 +78,8 @@ Annotations are saved automatically in `~/.pdf-review/`. The PDF itself is never
 
 ## Collecting reviews
 
-Open each `… - review - Name.json` you get back with PDF Review (or drop it in
-`~/.pdf-review/inbox/`) while the PDF is open. Everyone's comments appear on the pages, tagged
+Open each `… - review - Name.json` you get back with PDF Review (or drop it in the
+[inbox](#command-line)) while the PDF is open. Everyone's comments appear on the pages, tagged
 with their name, and the sidebar filters by person. A newer review from the same person
 replaces their earlier one. **Export** gives one Markdown list with names.
 
@@ -95,8 +95,7 @@ both pinned to quoted text (formats in [REVIEW_LISTS.md](REVIEW_LISTS.md)):
 How the agent should work:
 
 1. **Read the text the way the app sees it**, so quotes match:
-   `pdf-review --text file.pdf` (on Mac the binary is
-   `~/Applications/PDF Review.app/Contents/MacOS/pdf-review` or in `/Applications`).
+   `pdf-review --text file.pdf` (see [Command line](#command-line) for where the binary is).
 2. **Find what a human must decide or check**: contradictions, missing owners or dates, vague
    requirements, numbers that disagree between sections, open TODOs, things that need sign-off.
    Skip typos and style unless asked.
@@ -104,14 +103,15 @@ How the agent should work:
    `priority` (`high` for blocking issues).
 4. **Quote verbatim**: half a sentence copied from the `--text` output, never paraphrased, and
    set `page` too.
-5. **Deliver it**: write the JSON into `~/.pdf-review/inbox/` for yourself, or save it as
+5. **Deliver it**: `pdf-review --send list.json` checks the file and puts it in the inbox, on
+   Mac and Windows alike. Or save it as
    `<pdf name>.review.json` next to the PDF when sending to someone else.
 
 A prompt you can give the agent:
 
 > Review `/path/to/file.pdf` with PDF Review. Read `REVIEW_LISTS.md` in the pdf-review repo,
 > extract the text with `pdf-review --text`, and write a review list of the places I need to
-> check or decide, quoting the text verbatim. Put it in `~/.pdf-review/inbox/`.
+> check or decide, quoting the text verbatim. Deliver it with `pdf-review --send`.
 
 For reading notes, the same steps apply, but step 3 is one note per passage that explains,
 summarises or flags something, and the file is a review with `notes`:
@@ -120,6 +120,27 @@ summarises or flags something, and the file is a review with `notes`:
 > reading notes section of `REVIEW_LISTS.md`. Quote verbatim from `pdf-review --text`.
 
 Sending notes again under the same name replaces that agent's earlier notes.
+
+## Command line
+
+The app binary also works as a command-line tool:
+
+| Command | Does |
+|---|---|
+| `pdf-review --text file.pdf` | Print each page's text exactly as the app searches it |
+| `pdf-review --send file.json` | Check a review list or reading notes and put it in the inbox |
+| `pdf-review --inbox` | Print the inbox folder |
+
+Where the binary is:
+
+- **Mac:** `"/Applications/PDF Review.app/Contents/MacOS/pdf-review"` (or under
+  `~/Applications`). To call it as `pdf-review`:
+  `ln -s "/Applications/PDF Review.app/Contents/MacOS/pdf-review" /opt/homebrew/bin/pdf-review`
+- **Windows:** `"PDF Review.exe"` in the folder you unzipped, for example
+  `& "$HOME\Documents\PDF-Review\PDF Review.exe" --inbox` in PowerShell.
+
+The inbox is `~/.pdf-review/inbox/` on Mac and `%USERPROFILE%\.pdf-review\inbox\` on Windows.
+Files can be copied there directly too; `--send` just checks them first and writes safely.
 
 ## Optional: ask Owl about a passage
 

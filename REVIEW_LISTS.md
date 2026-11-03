@@ -1,7 +1,8 @@
 # Review lists: sending places to look at
 
-An agent can hand the reviewer a checklist of places in a PDF. Write one JSON file into
-`~/.pdf-review/inbox/`. PDF Review picks it up within a few seconds, shows it in the sidebar's
+An agent can hand the reviewer a checklist of places in a PDF. Write one JSON file and run
+`pdf-review --send list.json`, or write it straight into the inbox: `~/.pdf-review/inbox/` on Mac,
+`%USERPROFILE%\.pdf-review\inbox\` on Windows (`pdf-review --inbox` prints it). PDF Review picks it up within a few seconds, shows it in the sidebar's
 **Review** tab, and pins each item to the page with a numbered badge.
 
 ## Format
@@ -44,7 +45,8 @@ An agent can hand the reviewer a checklist of places in a PDF. Write one JSON fi
 Print the text exactly as the app searches it, page by page:
 
 ```bash
-"$HOME/Applications/PDF Review.app/Contents/MacOS/pdf-review" --text /path/to/file.pdf
+"/Applications/PDF Review.app/Contents/MacOS/pdf-review" --text /path/to/file.pdf   # Mac
+& "C:\path\to\PDF Review.exe" --text C:\path\to\file.pdf                   # Windows
 ```
 
 Quote from this output. Other extractors may render some glyphs differently, and then the
@@ -98,7 +100,7 @@ with the note attached, tagged with `reviewer`, exactly like a person's sent rev
 | `notes[].quote` | no | Verbatim text to highlight, found the same way as review list quotes. |
 | `notes[].page` | no | Picks between repeated quotes. Without a quote, or if it is not found, the note becomes a sticky note at the top left of this page (marked "quote not found"). |
 
-Write it into `~/.pdf-review/inbox/`. It is imported when the document is open, otherwise it
+Deliver it with `pdf-review --send notes.json` (or write it into the inbox). It is imported when the document is open, otherwise it
 waits. Keep notes few and useful: one per passage worth a comment, not one per paragraph.
 
 ## For the reviewer
