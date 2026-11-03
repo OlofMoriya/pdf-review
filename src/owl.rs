@@ -175,6 +175,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // uses a shell script as a fake owl
     fn streams_and_reports_errors() {
         // a stand-in "owl" script: prints in two writes with a split UTF-8 char, then fails
         let dir = std::env::temp_dir().join(format!("pdf-review-owl-test-{}", std::process::id()));
