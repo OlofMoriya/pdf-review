@@ -20,7 +20,7 @@ cask "pdf-review" do
   desc "PDF reader for reviewing documents: annotate, comment, work through review lists"
   homepage "https://github.com/OlofMoriya/pdf-review"
 
-  depends_on macos: ">= :monterey"
+  depends_on macos: :monterey
 
   app "PDF Review.app"
 

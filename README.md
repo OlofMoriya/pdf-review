@@ -23,8 +23,14 @@ You only do this once. Works on Apple Silicon and Intel Macs, macOS 12 or later.
 Or with [Homebrew](https://brew.sh):
 
 ```bash
+brew trust olofmoriya/tap
+```
+
+```bash
 brew install --cask olofmoriya/tap/pdf-review
 ```
+
+Homebrew asks you to trust third-party taps once (`brew trust`).
 
 The first launch still needs **Open Anyway** as above.
 
