@@ -1919,15 +1919,17 @@ impl Reviewer {
             let items: Vec<&tasks::Task> = order.iter().copied().filter(|t| t.list == list && t.from == from && t.received == received).collect();
             let open = items.iter().filter(|t| !t.done).count();
             body = body.child(
+                // Title on its own wrapping line, so a long name never pushes the buttons off-screen.
                 div()
                     .flex()
-                    .items_baseline()
-                    .gap_2()
+                    .flex_col()
+                    .gap_0p5()
                     .px_1()
-                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(list.clone()))
+                    .child(div().w_full().text_sm().font_weight(FontWeight::SEMIBOLD).child(list.clone()))
+                    .child(div().flex().items_center().gap_2()
                     .child(div().text_xs().text_color(rgb(C_FAINT)).child(format!("from {from} · {}", ago(now.saturating_sub(received)))))
                     .child(div().flex_1())
-                    .child(div().text_xs().text_color(rgb(C_MUTED)).child(format!("{open} open")))
+                    .child(div().flex_none().text_xs().text_color(rgb(C_MUTED)).child(format!("{open} open")))
                     .child({
                         let key = format!("{list}\u{0}{from}\u{0}{received}");
                         let armed = self.confirm_remove.as_deref() == Some(key.as_str());
@@ -1950,7 +1952,8 @@ impl Reviewer {
                                 }
                                 cx.notify();
                             }))
-                    }),
+                            .flex_none()
+                    })),
             );
             for t in items {
                 let id = t.id.clone();
