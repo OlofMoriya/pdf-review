@@ -440,6 +440,8 @@ struct Reviewer {
     name_prompt: Option<String>,
     /// Sidebar filter: None = everyone, Some("") = you, Some(name) = that reviewer.
     author_filter: Option<String>,
+    /// A review list waiting for its second "Remove" click.
+    confirm_remove: Option<String>,
 }
 
 /// ⌘ on macOS, Ctrl elsewhere. On Windows Ctrl+D/U/B stay Vim scrolls (half page down/up, page up).
@@ -713,6 +715,7 @@ impl Reviewer {
             reviewer_name: settings.name.clone(),
             name_prompt: None,
             author_filter: None,
+            confirm_remove: None,
         };
         #[cfg(target_os = "macos")]
         {
@@ -1610,14 +1613,22 @@ impl Reviewer {
             }
             let name = list.title.clone().unwrap_or_else(|| "Review list".into());
             let from = list.from.clone().unwrap_or_else(|| "agent".into());
-            let new = tasks::into_tasks(list, now_secs(), || uuid::Uuid::new_v4().to_string());
+            let mut new = tasks::into_tasks(list, now_secs(), || uuid::Uuid::new_v4().to_string());
             let n = new.len();
+            // A list sent again replaces its earlier copy, keeping what was ticked off.
+            let done: Vec<String> = self.tasks.iter().filter(|t| t.list == name && t.from == from && t.done).map(|t| t.title.clone()).collect();
+            let replaced = self.tasks.iter().any(|t| t.list == name && t.from == from);
+            self.tasks.retain(|t| !(t.list == name && t.from == from));
+            for t in &mut new {
+                t.done = done.contains(&t.title);
+            }
             self.tasks.extend(new);
             self.resolve_tasks();
             self.save();
             file_away(&file, "imported");
             self.side_tab = SideTab::Review;
-            self.status = format!("{name} from {from}: {n} item{} to review", if n == 1 { "" } else { "s" }).into();
+            let verb = if replaced { "updated" } else { "to review" };
+            self.status = format!("{name} from {from}: {n} item{} {verb}", if n == 1 { "" } else { "s" }).into();
             changed = true;
         }
         if waiting != self.waiting {
@@ -1916,7 +1927,30 @@ impl Reviewer {
                     .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(list.clone()))
                     .child(div().text_xs().text_color(rgb(C_FAINT)).child(format!("from {from} · {}", ago(now.saturating_sub(received)))))
                     .child(div().flex_1())
-                    .child(div().text_xs().text_color(rgb(C_MUTED)).child(format!("{open} open"))),
+                    .child(div().text_xs().text_color(rgb(C_MUTED)).child(format!("{open} open")))
+                    .child({
+                        let key = format!("{list}\u{0}{from}\u{0}{received}");
+                        let armed = self.confirm_remove.as_deref() == Some(key.as_str());
+                        let (l, f) = (list.clone(), from.clone());
+                        plain_button(SharedString::from(format!("rm-{key}")))
+                            .text_xs()
+                            .text_color(rgb(if armed { 0xef5350 } else { C_FAINT }))
+                            .hover(|d| d.text_color(rgb(0xef5350)))
+                            .child(if armed { "Click again to remove" } else { "Remove" })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if this.confirm_remove.as_deref() == Some(key.as_str()) {
+                                    this.tasks.retain(|t| !(t.list == l && t.from == f && t.received == received));
+                                    this.confirm_remove = None;
+                                    this.current_task = None;
+                                    this.resolve_tasks();
+                                    this.save();
+                                    this.status = format!("Removed {l}").into();
+                                } else {
+                                    this.confirm_remove = Some(key.clone());
+                                }
+                                cx.notify();
+                            }))
+                    }),
             );
             for t in items {
                 let id = t.id.clone();
@@ -3714,6 +3748,25 @@ impl Reviewer {
                             cx.notify();
                         }))
                 }))
+                .children(self.author_filter.clone().filter(|p| !p.is_empty()).map(|who| {
+                    plain_button("rm-author")
+                        .w_full()
+                        .pt_1()
+                        .text_xs()
+                        .text_color(rgb(C_FAINT))
+                        .hover(|d| d.text_color(rgb(0xef5350)))
+                        .child(format!("Remove {who}'s annotations"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.checkpoint();
+                            let before = this.anns.len();
+                            this.anns.retain(|a| a.author != who);
+                            this.author_filter = None;
+                            this.selected = None;
+                            this.save();
+                            this.status = format!("Removed {} annotations from {who} (⌘Z to undo)", before - this.anns.len()).into();
+                            cx.notify();
+                        }))
+                }))
         });
         let caret = self.caret;
         let empty_msg = if self.pages.is_empty() {
@@ -3995,7 +4048,7 @@ fn seg_button(id: &'static str, active: bool) -> gpui::Stateful<gpui::Div> {
         .when(!active, |d| d.hover(|d| d.text_color(rgb(C_TEXT))))
 }
 
-fn plain_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
+fn plain_button(id: impl Into<gpui::ElementId>) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .flex()

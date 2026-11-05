@@ -70,6 +70,8 @@ quote would not match.
   half-written file is not read.
 - If no document is open and `document` is an existing absolute path, PDF Review opens it.
 - Lists for a document that is not open wait in the inbox until it is opened.
+- Sending a list again with the same `title` and `from` replaces the earlier copy. Items with
+  the same title keep their done state. Use a new `title` for a separate list.
 - Imported files move to `~/.pdf-review/inbox/imported/`, and invalid ones to `inbox/rejected/`
   (the reason shows in the app's footer).
 
@@ -108,5 +110,7 @@ waits. Keep notes few and useful: one per passage worth a comment, not one per p
 - **Tab / ⇧Tab** (or `]` / `[`): next or previous open item.
 - **x**: mark the current item done and go to the next one.
 - **R**: switch between the Annotations and Review tabs.
+- **Remove** next to a list's name deletes the whole list (click twice). In the Annotations tab,
+  pick a reviewer's chip and click **Remove <name>'s annotations** (⌘Z undoes it).
 - Done items, and which items arrived, are saved with the document's annotations, and
   "Export" includes them as a Markdown checklist.
