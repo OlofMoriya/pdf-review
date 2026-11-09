@@ -159,6 +159,9 @@ struct SaveFile {
     /// Vim marks: letter -> (page, y in PDF points from the page top).
     #[serde(default)]
     marks: std::collections::BTreeMap<char, (usize, f32)>,
+    /// Reviewers whose annotations are hidden ("" = you).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hidden: Vec<String>,
 }
 
 /// Per-user UI preferences, in ~/.pdf-review/settings.json.
@@ -440,6 +443,8 @@ struct Reviewer {
     name_prompt: Option<String>,
     /// Sidebar filter: None = everyone, Some("") = you, Some(name) = that reviewer.
     author_filter: Option<String>,
+    /// Reviewers whose annotations are hidden on the pages and in the list ("" = you).
+    hidden: Vec<String>,
     /// A review list waiting for its second "Remove" click.
     confirm_remove: Option<String>,
 }
@@ -716,6 +721,7 @@ impl Reviewer {
             name_prompt: None,
             author_filter: None,
             confirm_remove: None,
+            hidden: vec![],
         };
         #[cfg(target_os = "macos")]
         {
@@ -788,7 +794,7 @@ impl Reviewer {
                     .flatten()
                     .find_map(|s| std::fs::read_to_string(s).ok())
                     .and_then(|s| serde_json::from_str::<SaveFile>(&s).ok());
-                (self.anns, self.marks, self.tasks) = saved.map(|f| (f.annotations, f.marks, f.tasks)).unwrap_or_default();
+                (self.anns, self.marks, self.tasks, self.hidden) = saved.map(|f| (f.annotations, f.marks, f.tasks, f.hidden)).unwrap_or_default();
                 self.current_task = None;
                 self.undo.clear();
                 self.redo.clear();
@@ -816,6 +822,7 @@ impl Reviewer {
             path: path.display().to_string(),
             annotations: self.sorted(),
             marks: self.marks.clone(),
+            hidden: self.hidden.clone(),
             tasks: self.tasks.clone(),
         };
         let res = std::fs::create_dir_all(store_dir()).and_then(|_| std::fs::write(&side, serde_json::to_string_pretty(&file).unwrap()));
@@ -2758,6 +2765,7 @@ impl Reviewer {
             .rev()
             .find(|a| {
                 a.page == page
+                    && !self.hidden.contains(&a.author)
                     && if a.kind == Kind::Note {
                         self.note_rect(a).is_some_and(|r| r.contains(p, 3.0))
                     } else if a.spans.is_empty() {
@@ -3333,7 +3341,7 @@ impl Reviewer {
     fn page(&self, i: usize, pv: &PageView, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let page = i + 1;
         let (w, h) = (pv.w * self.zoom, pv.h * self.zoom);
-        let anns: Vec<Ann> = self.anns.iter().filter(|a| a.page == page).cloned().collect();
+        let anns: Vec<Ann> = self.anns.iter().filter(|a| a.page == page && !self.hidden.contains(&a.author)).cloned().collect();
         let selected = self.selected.clone();
         let drag = self.drag.as_ref().filter(|d| d.page == page).map(|d| (d.start, d.cur, d.points.clone()));
         let tool = self.tool;
@@ -3716,7 +3724,7 @@ impl Reviewer {
         people.sort();
         people.dedup();
         let filter = self.author_filter.clone();
-        let items: Vec<Ann> = self.sorted().into_iter().filter(|a| filter.as_ref().is_none_or(|f| &a.author == f)).collect();
+        let items: Vec<Ann> = self.sorted().into_iter().filter(|a| filter.as_ref().is_none_or(|f| &a.author == f) && !self.hidden.contains(&a.author)).collect();
         let count = items.len();
         // One chip per reviewer once others' reviews are imported.
         let chips = (!people.is_empty()).then(|| {
@@ -3735,8 +3743,34 @@ impl Reviewer {
                 .children(opts.into_iter().enumerate().map(|(i, (f, label))| {
                     let n = self.anns.iter().filter(|a| f.as_ref().is_none_or(|f| &a.author == f)).count();
                     let active = self.author_filter == f;
+                    let hidden = f.as_ref().is_some_and(|w| self.hidden.contains(w));
+                    // Show/hide toggle for one reviewer; "Everyone" has none.
+                    let eye = f.clone().map(|who| {
+                        div()
+                            .id(("eye", i))
+                            .pl_1p5()
+                            .text_color(rgb(if hidden { C_FAINT } else { 0xffffff }))
+                            .hover(|d| d.text_color(rgb(C_ACCENT)))
+                            .child(if hidden { "show" } else { "hide" })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                if let Some(ix) = this.hidden.iter().position(|h| *h == who) {
+                                    this.hidden.remove(ix);
+                                } else {
+                                    this.hidden.push(who.clone());
+                                    if this.author_filter.as_ref() == Some(&who) {
+                                        this.author_filter = None;
+                                    }
+                                    this.selected = None;
+                                    this.editing = false;
+                                }
+                                this.save();
+                                cx.notify();
+                            }))
+                    });
                     div()
                         .id(("who", i))
+                        .flex()
                         .px_2()
                         .py_0p5()
                         .rounded_full()
@@ -3744,10 +3778,15 @@ impl Reviewer {
                         .cursor_pointer()
                         .bg(rgb(if active { C_ACCENT } else { C_SEG }))
                         .text_color(rgb(if active { 0xffffff } else { C_MUTED }))
+                        .when(hidden, |d| d.opacity(0.5).line_through())
                         .hover(|d| d.text_color(rgb(0xffffff)))
                         .child(format!("{label} {n}"))
+                        .children(eye)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.author_filter = f.clone();
+                            if let Some(w) = &f {
+                                this.hidden.retain(|h| h != w);
+                            }
                             cx.notify();
                         }))
                 }))

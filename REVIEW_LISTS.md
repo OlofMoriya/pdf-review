@@ -112,5 +112,7 @@ waits. Keep notes few and useful: one per passage worth a comment, not one per p
 - **R**: switch between the Annotations and Review tabs.
 - **Remove** next to a list's name deletes the whole list (click twice). In the Annotations tab,
   pick a reviewer's chip and click **Remove <name>'s annotations** (⌘Z undoes it).
+- **hide** on a reviewer's chip hides their annotations on the pages and in the list without
+  deleting them; **show** brings them back. This is saved with the document.
 - Done items, and which items arrived, are saved with the document's annotations, and
   "Export" includes them as a Markdown checklist.
