@@ -110,9 +110,10 @@ waits. Keep notes few and useful: one per passage worth a comment, not one per p
 - **Tab / ⇧Tab** (or `]` / `[`): next or previous open item.
 - **x**: mark the current item done and go to the next one.
 - **R**: switch between the Annotations and Review tabs.
-- **Remove** next to a list's name deletes the whole list (click twice). In the Annotations tab,
-  pick a reviewer's chip and click **Remove <name>'s annotations** (⌘Z undoes it).
-- **hide** on a reviewer's chip hides their annotations on the pages and in the list without
-  deleting them; **show** brings them back. This is saved with the document.
+- **Remove** next to a list's name deletes the whole list (click twice).
+- In the Annotations tab, each reviewer chip shows or hides that person's annotations (on the
+  pages and in the list). ⌥-click shows only that person, **All** shows everyone. This is saved
+  with the document. With only one other reviewer showing, **Remove <name>'s annotations**
+  deletes theirs (⌘Z undoes it).
 - Done items, and which items arrived, are saved with the document's annotations, and
   "Export" includes them as a Markdown checklist.

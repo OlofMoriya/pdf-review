@@ -441,8 +441,6 @@ struct Reviewer {
     reviewer_name: Option<String>,
     /// "Your name" prompt, shown the first time you send a review.
     name_prompt: Option<String>,
-    /// Sidebar filter: None = everyone, Some("") = you, Some(name) = that reviewer.
-    author_filter: Option<String>,
     /// Reviewers whose annotations are hidden on the pages and in the list ("" = you).
     hidden: Vec<String>,
     /// A review list waiting for its second "Remove" click.
@@ -719,7 +717,6 @@ impl Reviewer {
             picker_scroll: ScrollHandle::new(),
             reviewer_name: settings.name.clone(),
             name_prompt: None,
-            author_filter: None,
             confirm_remove: None,
             hidden: vec![],
         };
@@ -803,7 +800,6 @@ impl Reviewer {
                 self.vim.reset();
                 self.repair_quotes();
                 self.resolve_tasks();
-                self.author_filter = None;
                 self.import_list_beside();
                 self.selected = None;
                 self.editing = false;
@@ -1669,7 +1665,6 @@ impl Reviewer {
         }));
         self.save();
         self.side_tab = SideTab::Annotations;
-        self.author_filter = None;
         Ok(Some(format!("Imported {n} annotation{} from {who}", if n == 1 { "" } else { "s" })))
     }
 
@@ -3723,16 +3718,19 @@ impl Reviewer {
         let mut people: Vec<String> = self.anns.iter().map(|a| a.author.clone()).filter(|a| !a.is_empty()).collect();
         people.sort();
         people.dedup();
-        let filter = self.author_filter.clone();
-        let items: Vec<Ann> = self.sorted().into_iter().filter(|a| filter.as_ref().is_none_or(|f| &a.author == f) && !self.hidden.contains(&a.author)).collect();
+        let items: Vec<Ann> = self.sorted().into_iter().filter(|a| !self.hidden.contains(&a.author)).collect();
         let count = items.len();
-        // One chip per reviewer once others' reviews are imported.
+        // One toggle chip per reviewer once others' reviews are imported. Click shows or hides
+        // that person, ⌥-click shows only them, "All" shows everyone.
         let chips = (!people.is_empty()).then(|| {
             let me = self.reviewer_name.clone().unwrap_or_else(|| "Me".into());
-            let opts: Vec<(Option<String>, String)> = [(None, "Everyone".to_string()), (Some(String::new()), me)]
+            let everyone: Vec<String> = std::iter::once(String::new()).chain(people.iter().cloned()).collect();
+            let visible: Vec<String> = everyone.iter().filter(|w| !self.hidden.contains(w)).cloned().collect();
+            let opts: Vec<(Option<String>, String)> = [(None, "All".to_string()), (Some(String::new()), me)]
                 .into_iter()
                 .chain(people.into_iter().map(|p| (Some(p.clone()), p)))
                 .collect();
+            let solo = (visible.len() == 1 && !visible[0].is_empty()).then(|| visible[0].clone());
             div()
                 .flex_none()
                 .flex()
@@ -3742,55 +3740,43 @@ impl Reviewer {
                 .pt_3()
                 .children(opts.into_iter().enumerate().map(|(i, (f, label))| {
                     let n = self.anns.iter().filter(|a| f.as_ref().is_none_or(|f| &a.author == f)).count();
-                    let active = self.author_filter == f;
-                    let hidden = f.as_ref().is_some_and(|w| self.hidden.contains(w));
-                    // Show/hide toggle for one reviewer; "Everyone" has none.
-                    let eye = f.clone().map(|who| {
-                        div()
-                            .id(("eye", i))
-                            .pl_1p5()
-                            .text_color(rgb(if hidden { C_FAINT } else { 0xffffff }))
-                            .hover(|d| d.text_color(rgb(C_ACCENT)))
-                            .child(if hidden { "show" } else { "hide" })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                if let Some(ix) = this.hidden.iter().position(|h| *h == who) {
-                                    this.hidden.remove(ix);
-                                } else {
-                                    this.hidden.push(who.clone());
-                                    if this.author_filter.as_ref() == Some(&who) {
-                                        this.author_filter = None;
-                                    }
-                                    this.selected = None;
-                                    this.editing = false;
-                                }
-                                this.save();
-                                cx.notify();
-                            }))
-                    });
+                    let on = match &f {
+                        None => self.hidden.is_empty(),
+                        Some(w) => !self.hidden.contains(w),
+                    };
+                    let all = everyone.clone();
                     div()
                         .id(("who", i))
-                        .flex()
                         .px_2()
                         .py_0p5()
                         .rounded_full()
                         .text_xs()
                         .cursor_pointer()
-                        .bg(rgb(if active { C_ACCENT } else { C_SEG }))
-                        .text_color(rgb(if active { 0xffffff } else { C_MUTED }))
-                        .when(hidden, |d| d.opacity(0.5).line_through())
+                        .bg(rgb(if on { C_ACCENT } else { C_SEG }))
+                        .text_color(rgb(if on { 0xffffff } else { C_FAINT }))
+                        .when(!on && f.is_some(), |d| d.line_through())
                         .hover(|d| d.text_color(rgb(0xffffff)))
                         .child(format!("{label} {n}"))
-                        .children(eye)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.author_filter = f.clone();
-                            if let Some(w) = &f {
-                                this.hidden.retain(|h| h != w);
+                        .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, _, cx| {
+                            match &f {
+                                None => this.hidden.clear(),
+                                Some(w) if ev.modifiers().alt => this.hidden = all.iter().filter(|x| *x != w).cloned().collect(),
+                                Some(w) => match this.hidden.iter().position(|h| h == w) {
+                                    Some(ix) => {
+                                        this.hidden.remove(ix);
+                                    }
+                                    None => this.hidden.push(w.clone()),
+                                },
                             }
+                            if this.selected.as_ref().is_some_and(|id| this.anns.iter().any(|a| &a.id == id && this.hidden.contains(&a.author))) {
+                                this.selected = None;
+                                this.editing = false;
+                            }
+                            this.save();
                             cx.notify();
                         }))
                 }))
-                .children(self.author_filter.clone().filter(|p| !p.is_empty()).map(|who| {
+                .children(solo.map(|who| {
                     plain_button("rm-author")
                         .w_full()
                         .pt_1()
@@ -3802,7 +3788,7 @@ impl Reviewer {
                             this.checkpoint();
                             let before = this.anns.len();
                             this.anns.retain(|a| a.author != who);
-                            this.author_filter = None;
+                            this.hidden.clear();
                             this.selected = None;
                             this.save();
                             this.status = format!("Removed {} annotations from {who} (⌘Z to undo)", before - this.anns.len()).into();
