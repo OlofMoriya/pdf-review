@@ -31,7 +31,8 @@ An agent can hand the reviewer a checklist of places in a PDF. Write one JSON fi
 
 | Field | Required | Meaning |
 |---|---|---|
-| `document` | yes | Absolute path to the PDF (preferred), `~/...`, or just its file name. |
+| `document` | yes | Absolute path to the PDF (preferred), `~/...`, just its file name, or its content hash. |
+| `document_hash` | no | The PDF's content hash (`pdf-review --hash`). Matches a renamed or copied PDF. `--send` adds it for you. |
 | `title` | no | Name of the list. Default "Review list". |
 | `from` | no | Who sent it, shown next to the list. Default "agent". |
 | `items[].title` | yes | What to do, in a few words. |
@@ -58,7 +59,13 @@ quote would not match.
   a quote can span lines. An exact-case match is preferred, then any case.
 - When the quote appears several times, the match nearest `page` wins.
 - Keep quotes short and distinctive: half a sentence copied verbatim is ideal. Don't paraphrase.
+- Look-alike characters match each other: curly and straight quotes, the hyphens and dashes
+  (‐ ‑ – — −) and non-breaking spaces. Ligatures and soft hyphens do not.
 - If the quote is not found, the item falls back to `page` and is marked "quote not found".
+
+Check before sending: `pdf-review --check list.json --pdf file.pdf` prints one line per item
+(`ok p14`, `not found`, `found on p16, not p14`, `ambiguous: p7, p9`, `page only p3`) and exits
+with 1 if any line is marked `!`. `--send` runs the same check whenever it can find the PDF.
 
 ## Delivery rules
 
@@ -72,6 +79,7 @@ quote would not match.
 - Lists for a document that is not open wait in the inbox until it is opened.
 - Sending a list again with the same `title` and `from` replaces the earlier copy. Items with
   the same title keep their done state. Use a new `title` for a separate list.
+- `pdf-review --inbox --status` shows what is waiting, imported and rejected, with the reason.
 - Imported files move to `~/.pdf-review/inbox/imported/`, and invalid ones to `inbox/rejected/`
   (the reason shows in the app's footer).
 
@@ -104,6 +112,12 @@ with the note attached, tagged with `reviewer`, exactly like a person's sent rev
 
 Deliver it with `pdf-review --send notes.json` (or write it into the inbox). It is imported when the document is open, otherwise it
 waits. Keep notes few and useful: one per passage worth a comment, not one per paragraph.
+
+- Sending again with the same `reviewer` replaces that reviewer's earlier notes on the document,
+  so fix and re-send freely. Use a new `reviewer` name to add a separate set.
+- To ship notes with the PDF, put the JSON in the same folder (any name, for example
+  `Policy.notes.json`). It is imported when the PDF is opened, once: removing those notes in
+  the app does not bring them back, but a changed file is imported again.
 
 ## For the reviewer
 

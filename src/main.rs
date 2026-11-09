@@ -7,13 +7,14 @@
 //! each mark, and export the review as Markdown. Annotations autosave to
 //! `~/.pdf-review/annotations/<content-hash>.json`, so they follow the PDF across renames/moves.
 
+mod cli;
 mod owl;
 mod review;
 mod search;
 mod tasks;
 mod vim;
 
-use std::{cell::RefCell, collections::HashMap, path::{Path, PathBuf}, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
 use gpui::{
     App, Application, BorderStyle, Bounds, ClipboardItem, Context, FocusHandle, FontWeight, Hsla,
@@ -75,10 +76,14 @@ fn inbox_dir() -> PathBuf {
 }
 
 /// Move a processed inbox file into a subfolder, keeping it for reference.
-fn file_away(path: &std::path::Path, sub: &str) {
+/// A rejected file keeps its reason next to it (`<name>.reason.txt`) for `--inbox --status`.
+fn file_away(path: &std::path::Path, sub: &str, reason: Option<&str>) {
     let dir = inbox_dir().join(sub);
     let _ = std::fs::create_dir_all(&dir);
     let name = format!("{}-{}", now_secs(), path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    if let Some(r) = reason {
+        let _ = std::fs::write(dir.join(format!("{name}.reason.txt")), r);
+    }
     if std::fs::rename(path, dir.join(name)).is_err() {
         let _ = std::fs::remove_file(path);
     }
@@ -162,6 +167,9 @@ struct SaveFile {
     /// Reviewers whose annotations are hidden ("" = you).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hidden: Vec<String>,
+    /// Content hashes of reviews already imported from beside the PDF, so they load once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    imported: Vec<String>,
 }
 
 /// Per-user UI preferences, in ~/.pdf-review/settings.json.
@@ -443,6 +451,8 @@ struct Reviewer {
     name_prompt: Option<String>,
     /// Reviewers whose annotations are hidden on the pages and in the list ("" = you).
     hidden: Vec<String>,
+    /// Content hashes of reviews imported from beside the PDF.
+    imported: Vec<String>,
     /// A review list waiting for its second "Remove" click.
     confirm_remove: Option<String>,
 }
@@ -648,11 +658,6 @@ fn store_dir() -> PathBuf {
     home().join(".pdf-review").join("annotations")
 }
 
-/// FNV-1a 64: stable across Rust versions, unlike DefaultHasher.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3))
-}
-
 fn hex(c: u32) -> String {
     format!("#{c:06x}")
 }
@@ -719,6 +724,7 @@ impl Reviewer {
             name_prompt: None,
             confirm_remove: None,
             hidden: vec![],
+            imported: vec![],
         };
         #[cfg(target_os = "macos")]
         {
@@ -784,14 +790,14 @@ impl Reviewer {
         match load_pages(&path) {
             Ok(pages) => {
                 self.pages = pages;
-                self.doc_hash = std::fs::read(&path).ok().map(|b| format!("{:016x}", fnv1a(&b)));
+                self.doc_hash = tasks::file_hash(&path);
                 self.path = Some(path);
                 let saved = [self.sidecar(), self.legacy_sidecar()]
                     .into_iter()
                     .flatten()
                     .find_map(|s| std::fs::read_to_string(s).ok())
                     .and_then(|s| serde_json::from_str::<SaveFile>(&s).ok());
-                (self.anns, self.marks, self.tasks, self.hidden) = saved.map(|f| (f.annotations, f.marks, f.tasks, f.hidden)).unwrap_or_default();
+                (self.anns, self.marks, self.tasks, self.hidden, self.imported) = saved.map(|f| (f.annotations, f.marks, f.tasks, f.hidden, f.imported)).unwrap_or_default();
                 self.current_task = None;
                 self.undo.clear();
                 self.redo.clear();
@@ -801,6 +807,7 @@ impl Reviewer {
                 self.repair_quotes();
                 self.resolve_tasks();
                 self.import_list_beside();
+                self.import_reviews_beside();
                 self.selected = None;
                 self.editing = false;
                 self.picker = None;
@@ -819,6 +826,7 @@ impl Reviewer {
             annotations: self.sorted(),
             marks: self.marks.clone(),
             hidden: self.hidden.clone(),
+            imported: self.imported.clone(),
             tasks: self.tasks.clone(),
         };
         let res = std::fs::create_dir_all(store_dir()).and_then(|_| std::fs::write(&side, serde_json::to_string_pretty(&file).unwrap()));
@@ -1583,12 +1591,12 @@ impl Reviewer {
                 match self.import_review(&json) {
                     Ok(Some(msg)) => {
                         self.status = msg.into();
-                        file_away(&file, "imported");
+                        file_away(&file, "imported", None);
                     }
                     Ok(None) => waiting.push(file.file_name().unwrap_or_default().to_string_lossy().to_string()),
                     Err(e) => {
+                        file_away(&file, "rejected", Some(&e));
                         self.status = e.into();
-                        file_away(&file, "rejected");
                     }
                 }
                 changed = true;
@@ -1598,7 +1606,7 @@ impl Reviewer {
                 Ok(l) => l,
                 Err(e) => {
                     self.status = format!("Rejected review list {}: {e}", file.file_name().unwrap_or_default().to_string_lossy()).into();
-                    file_away(&file, "rejected");
+                    file_away(&file, "rejected", Some(&e));
                     changed = true;
                     continue;
                 }
@@ -1609,7 +1617,7 @@ impl Reviewer {
                     changed = true;
                 }
             }
-            let ours = self.path.as_ref().is_some_and(|p| tasks::matches_document(&list.document, p));
+            let ours = self.path.as_ref().is_some_and(|p| tasks::matches_document(&list.document, list.document_hash.as_deref(), p, self.doc_hash.as_deref()));
             if !ours {
                 waiting.push(list.document.clone());
                 continue;
@@ -1628,7 +1636,7 @@ impl Reviewer {
             self.tasks.extend(new);
             self.resolve_tasks();
             self.save();
-            file_away(&file, "imported");
+            file_away(&file, "imported", None);
             self.side_tab = SideTab::Review;
             let verb = if replaced { "updated" } else { "to review" };
             self.status = format!("{name} from {from}: {n} item{} {verb}", if n == 1 { "" } else { "s" }).into();
@@ -1649,7 +1657,7 @@ impl Reviewer {
         if who.is_empty() {
             return Err("Review has no reviewer name".into());
         }
-        let ours = self.path.as_ref().is_some_and(|p| tasks::matches_document(&sent.document, p));
+        let ours = self.path.as_ref().is_some_and(|p| tasks::matches_document(&sent.document, sent.document_hash.as_deref(), p, self.doc_hash.as_deref()));
         if !ours {
             return Ok(None);
         }
@@ -1691,6 +1699,37 @@ impl Reviewer {
         }
     }
 
+    /// Reviews and reading notes shipped in the PDF's folder (any JSON with
+    /// `"format": "pdf-review/review"` for this document), each imported once.
+    fn import_reviews_beside(&mut self) {
+        let Some(dir) = self.path.as_ref().and_then(|p| p.parent()).map(|d| d.to_path_buf()) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.metadata().is_ok_and(|m| m.is_file() && m.len() < 20_000_000))
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("json")))
+            .collect();
+        files.sort();
+        let mut done = vec![];
+        for file in files {
+            let Some(json) = std::fs::read_to_string(&file).ok().filter(|s| review::is_review(s)) else { continue };
+            let Some(key) = tasks::file_hash(&file).filter(|k| !self.imported.contains(k)) else { continue };
+            match self.import_review(&json) {
+                Ok(Some(msg)) => {
+                    self.imported.push(key);
+                    done.push(msg);
+                }
+                Ok(None) => {}
+                Err(e) => self.status = format!("{}: {e}", file.file_name().unwrap_or_default().to_string_lossy()).into(),
+            }
+        }
+        if !done.is_empty() {
+            self.save();
+            self.status = done.join(" · ").into();
+        }
+    }
+
     /// A review list shipped next to the PDF (`name.review.json`), imported once.
     fn import_list_beside(&mut self) {
         let Some(file) = self.path.as_deref().and_then(review::list_beside) else { return };
@@ -1720,6 +1759,7 @@ impl Reviewer {
         let sent = review::Sent {
             format: review::FORMAT.into(),
             document: path.file_name().unwrap_or_default().to_string_lossy().into(),
+            document_hash: self.doc_hash.clone(),
             reviewer: me.clone(),
             sent: now_secs(),
             items: self.sorted_tasks().into_iter().map(|t| review::ItemState { title: t.title.clone(), done: t.done }).collect(),
@@ -4553,66 +4593,10 @@ fn set_dock_icon() {
     }
 }
 
-/// Command-line use, for agents and scripts (see REVIEW_LISTS.md). Returns the exit code.
-fn cli(args: &[String]) -> i32 {
-    let usage = "usage:\n  pdf-review --text <file.pdf>    print each page's text as the app searches it\n  pdf-review --send <file.json>   put a review list or reading notes in the inbox\n  pdf-review --inbox              print the inbox folder";
-    match (args[0].as_str(), args.get(1)) {
-        ("--text", Some(file)) => match load_pages(&PathBuf::from(file)) {
-            Ok(pages) => {
-                for (i, pv) in pages.iter().enumerate() {
-                    println!("=== page {} ===", i + 1);
-                    println!("{}", pv.flat.iter().collect::<String>());
-                }
-                0
-            }
-            Err(e) => {
-                eprintln!("could not read {file}: {e}");
-                1
-            }
-        },
-        ("--send", Some(file)) => match send_to_inbox(Path::new(file)) {
-            Ok(dest) => {
-                println!("{}", dest.display());
-                0
-            }
-            Err(e) => {
-                eprintln!("{e}");
-                1
-            }
-        },
-        ("--inbox", None) => {
-            println!("{}", inbox_dir().display());
-            0
-        }
-        _ => {
-            eprintln!("{usage}");
-            2
-        }
-    }
-}
-
-/// Check a review list or sent review and move it into the inbox atomically.
-fn send_to_inbox(file: &Path) -> Result<PathBuf, String> {
-    let json = std::fs::read_to_string(file).map_err(|e| format!("could not read {}: {e}", file.display()))?;
-    if review::is_review(&json) {
-        serde_json::from_str::<review::Sent<Ann>>(&json).map_err(|e| format!("not a valid review: {e}"))?;
-    } else {
-        tasks::parse(&json)?;
-    }
-    let dir = inbox_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let name = format!("{}-{}.json", now_secs(), file.file_stem().unwrap_or_default().to_string_lossy());
-    let tmp = dir.join(format!("{name}.part"));
-    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
-    let dest = dir.join(name);
-    std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
-    Ok(dest)
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).is_some_and(|a| a.starts_with("--")) {
-        std::process::exit(cli(&args[1..]));
+        std::process::exit(cli::run(&args[1..]));
     }
     let arg = std::env::args().nth(1).map(PathBuf::from);
     // Files opened from Finder / "Open With" arrive as file:// URLs, possibly before launch finishes.

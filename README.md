@@ -128,8 +128,15 @@ The app binary also works as a command-line tool:
 | Command | Does |
 |---|---|
 | `pdf-review --text file.pdf` | Print each page's text exactly as the app searches it |
-| `pdf-review --send file.json` | Check a review list or reading notes and put it in the inbox |
+| `pdf-review --check file.json [--pdf file.pdf]` | Dry run: one line per item, `ok p14`, `not found`, `found on p16, not p14` or `ambiguous: p7, p9`. Exit code 1 if any line needs attention |
+| `pdf-review --send file.json [--pdf file.pdf]` | Validate, run the same check when the PDF can be found, stamp the PDF's content hash, and put it in the inbox |
 | `pdf-review --inbox` | Print the inbox folder |
+| `pdf-review --inbox --status` | What is waiting, imported and rejected (with the reason) |
+| `pdf-review --annotations file.pdf [--author name] [--json]` | The annotations stored for a PDF; `--author me` for your own |
+| `pdf-review --hash file.pdf` | The PDF's content hash |
+
+Without `--pdf`, the PDF is found from `document`: as a path, or by that name next to the JSON
+file or in the current folder.
 
 Where the binary is:
 

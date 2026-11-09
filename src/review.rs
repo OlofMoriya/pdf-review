@@ -13,6 +13,9 @@ pub const FORMAT: &str = "pdf-review/review";
 pub struct Sent<A> {
     pub format: String,
     pub document: String,
+    /// Content hash of the PDF, so the review matches a renamed copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_hash: Option<String>,
     pub reviewer: String,
     #[serde(default)]
     pub sent: u64,
@@ -98,7 +101,7 @@ mod tests {
     fn names_and_detection() {
         assert_eq!(file_name(Path::new("/x/Policy v2.pdf"), "Anna Svensson"), "Policy v2 - review - Anna Svensson.json");
         assert_eq!(file_name(Path::new("a.pdf"), " A/B: C "), "a - review - A_B_ C.json");
-        let sent = Sent::<u8> { format: FORMAT.into(), document: "a.pdf".into(), reviewer: "A".into(), sent: 1, annotations: vec![], notes: vec![], items: vec![] };
+        let sent = Sent::<u8> { format: FORMAT.into(), document: "a.pdf".into(), document_hash: None, reviewer: "A".into(), sent: 1, annotations: vec![], notes: vec![], items: vec![] };
         assert!(is_review(&serde_json::to_string(&sent).unwrap()));
         assert!(!is_review(r#"{"document":"a.pdf","items":[{"title":"x"}]}"#));
         assert!(!is_review("nope"));

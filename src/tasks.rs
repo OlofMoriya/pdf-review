@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 pub struct Incoming {
     /// Absolute path to the PDF, or just its file name.
     pub document: String,
+    /// Content hash of the PDF (`pdf-review --hash`), so a renamed copy still matches.
+    #[serde(default)]
+    pub document_hash: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     /// Who sent it ("claude", "owl", ...).
@@ -69,17 +72,31 @@ pub fn parse(json: &str) -> Result<Incoming, String> {
     Ok(list)
 }
 
-/// Does the list's `document` refer to the open PDF? Full paths must match exactly
-/// (after resolving symlinks); a bare file name matches case-insensitively.
-pub fn matches_document(doc: &str, open: &std::path::Path) -> bool {
+/// FNV-1a 64 of the file's bytes: the key the app stores a document's annotations under.
+pub fn file_hash(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(format!("{:016x}", bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3))))
+}
+
+/// Does a list's or review's document refer to the open PDF? The content hash wins when
+/// either side has one, so renamed and copied PDFs match. Otherwise full paths must match
+/// (after resolving symlinks) or have the same content; a bare file name matches
+/// case-insensitively.
+pub fn matches_document(doc: &str, doc_hash: Option<&str>, open: &std::path::Path, open_hash: Option<&str>) -> bool {
     let doc = doc.trim();
+    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    if let Some(h) = open_hash {
+        if doc_hash.is_some_and(|d| same(d, h)) || same(doc, h) {
+            return true;
+        }
+    }
     let expanded = match doc.strip_prefix("~/") {
         Some(rest) => std::env::home_dir().unwrap_or_default().join(rest),
         None => std::path::PathBuf::from(doc),
     };
     if expanded.is_absolute() {
         let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-        return canon(&expanded) == canon(open);
+        return canon(&expanded) == canon(open) || (open_hash.is_some() && expanded.is_file() && file_hash(&expanded).as_deref() == open_hash);
     }
     open.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(doc))
 }
@@ -135,6 +152,36 @@ pub fn locate(pages: &[&[char]], quote: &str, page_hint: Option<usize>) -> Optio
     None
 }
 
+/// How a quote anchors, for `pdf-review --check`: (fine?, "ok p14" / "not found" /
+/// "found on p16, not p14" / "ambiguous: p7, p9"). Mirrors `locate`: exact-case hits win.
+pub fn check(pages: &[&[char]], quote: &str, hint: Option<usize>) -> (bool, String) {
+    if quote.split_whitespace().next().is_none() {
+        return match hint {
+            Some(p) if p >= 1 && p <= pages.len() => (true, format!("page only p{p}")),
+            Some(p) => (false, format!("no quote, and p{p} is past the last page ({})", pages.len())),
+            None => (false, "no quote and no page".into()),
+        };
+    }
+    let hits = |exact: bool| -> Vec<usize> {
+        pages.iter().enumerate().flat_map(|(i, t)| crate::search::find_with(t, quote, exact).into_iter().map(move |_| i + 1)).collect()
+    };
+    let mut on = hits(true);
+    if on.is_empty() {
+        on = hits(false);
+    }
+    let list = |v: &[usize]| v.iter().map(|p| format!("p{p}")).collect::<Vec<_>>().join(", ");
+    match (on.as_slice(), hint) {
+        ([], _) => (false, "not found".into()),
+        ([p], None) => (true, format!("ok p{p}")),
+        (_, None) => (false, format!("ambiguous: {}", list(&on))),
+        (_, Some(h)) => match on.iter().filter(|p| **p == h).count() {
+            0 => (false, format!("found on {}, not p{h}", list(&on))),
+            1 => (true, format!("ok p{h}")),
+            _ => (false, format!("ambiguous: {}", list(&on))),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,13 +208,36 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let pdf = dir.join("Policy Draft.pdf");
         std::fs::write(&pdf, b"%PDF").unwrap();
-        assert!(matches_document(pdf.to_str().unwrap(), &pdf));
-        assert!(matches_document("policy draft.PDF", &pdf));
-        assert!(!matches_document("other.pdf", &pdf));
-        assert!(!matches_document("/elsewhere/Policy Draft.pdf", &pdf), "full paths must match exactly");
+        let m = |doc: &str| matches_document(doc, None, &pdf, None);
+        assert!(m(pdf.to_str().unwrap()));
+        assert!(m("policy draft.PDF"));
+        assert!(!m("other.pdf"));
+        assert!(!m("/elsewhere/Policy Draft.pdf"), "full paths must match exactly");
+        // by content: a renamed copy, a hash in `document_hash`, or a hash as `document`
+        let h = file_hash(&pdf).unwrap();
+        let copy = dir.join("Policy Draft (1).pdf");
+        std::fs::write(&copy, b"%PDF").unwrap();
+        assert!(matches_document(pdf.to_str().unwrap(), None, &copy, Some(&h)));
+        assert!(matches_document("Policy Draft.pdf", Some(&h), &copy, Some(&h)));
+        assert!(matches_document(&h, None, &copy, Some(&h)));
+        assert!(!matches_document("Policy Draft.pdf", Some("0000000000000000"), &copy, Some(&h)));
         assert_eq!(document_path(pdf.to_str().unwrap()), Some(pdf.clone()));
         assert_eq!(document_path("Policy Draft.pdf"), None);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn checks_quotes() {
+        let p1: Vec<char> = "Alarm goes off. Doors lock.".chars().collect();
+        let p2: Vec<char> = "Doors lock at night.".chars().collect();
+        let pages: Vec<&[char]> = vec![&p1, &p2];
+        assert_eq!(check(&pages, "Alarm goes", None), (true, "ok p1".into()));
+        assert_eq!(check(&pages, "Alarm goes", Some(2)), (false, "found on p1, not p2".into()));
+        assert_eq!(check(&pages, "Doors lock", None), (false, "ambiguous: p1, p2".into()));
+        assert_eq!(check(&pages, "Doors lock", Some(2)), (true, "ok p2".into()));
+        assert_eq!(check(&pages, "nowhere", Some(1)), (false, "not found".into()));
+        assert_eq!(check(&pages, "", Some(2)), (true, "page only p2".into()));
+        assert_eq!(check(&pages, "", None).0, false);
     }
 
     #[test]
